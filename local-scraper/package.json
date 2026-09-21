@@ -1,0 +1,12 @@
+{
+  "name": "acbl-local-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "scripts": {
+    "scrape": "node scrape.mjs"
+  }
+}

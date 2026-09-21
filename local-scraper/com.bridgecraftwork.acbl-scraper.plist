@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bridgecraftwork.acbl-scraper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/rick/Development/GitHub/acbl-proxy/local-scraper/scrape.mjs</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/rick/Development/GitHub/acbl-proxy/local-scraper</string>
+  <!-- Before the 1:55 AM refreshCalendar trigger, which then sees a fresh ingest and skips.
+       If the Mac is asleep at 1:30, launchd runs this on wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>1</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/rick/Library/Logs/acbl-scraper.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/rick/Library/Logs/acbl-scraper.log</string>
+</dict>
+</plist>

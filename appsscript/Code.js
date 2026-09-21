@@ -11,8 +11,8 @@ const CFG = {
   // 2) The JSON endpoint the page calls. Replace actual year/district in that URL with {YEAR} and {DIST}.
   // Example (you will replace with the *real* one you saw in DevTools):
   // "https://members.acbl.org/api/tournaments?year={YEAR}&district={DIST}&page=1"
-  apiBase: "https://tournaments.acbl.org/includes/ajax/tournamentslist.php",
-  apiTemplate: "https://tournaments.acbl.org/includes/ajax/tournamentslist.php?month=&year={YEAR}&category={CATEGORY}&type=&city=&state=&district={DIST}&unit=",
+  apiBase: "https://tournaments.acbl.org/ajax/tournamentslist",
+  apiTemplate: "https://tournaments.acbl.org/ajax/tournamentslist?month=&year={YEAR}&category={CATEGORY}&type=&city=&state=&district={DIST}&unit=",
 
   // 3) Your shared secret (same as Cloud Run env PROXY_SECRET)
   //    Stored in Project Settings > Script Properties, not hardcoded here.
@@ -20,136 +20,193 @@ const CFG = {
 };
 
 /***** MAIN *****/
+// If the local Playwright scraper (local-scraper/) delivered data within this window,
+// a blocked proxy run is logged as SKIPPED instead of failing.
+const INGEST_FRESH_HOURS = 20;
+
 function refreshCalendar() {
-  const ss = SpreadsheetApp.getActive();
-  const tz = CFG.timezone || "America/Los_Angeles";
   const years = CFG.years.slice();
-  const all = [];
+  let raw;
 
   try {
-    years.forEach(yr => {
-      // 1) NABC events once per year
-      const nabcUrl = makeUrl_(CFG.apiBase, {
-        month: "",
-        year: yr,
-        category: "N",   // NABC
-        type: "",
-        city: "",
-        state: "",
-        district: "",
-        unit: ""
-      });
-      Logger.log(`NABC fetch for ${yr}: ${nabcUrl}`);
-
-      let json = fetchJsonViaProxy(nabcUrl);
-      let rows = (json && Array.isArray(json.aaData)) ? json.aaData : [];
-      Logger.log(`  NABC rows (${yr}): ${rows.length}`);
-
-      rows.forEach(cols => {
-        all.push(normalizeRow_(cols, ""));  // no district; global
-      });
-
-      Utilities.sleep(200);
-
-      // 2) Per-district all events (catches STaC & any cross-district definitions)
-      for (let d = 1; d <= 25; d++) {
-        const dStr = String(d);
-        const url = makeUrl_(CFG.apiBase, {
-          month: "",
-          year: yr,
-          category: "",  // all categories
-          type: "",      // all types
-          city: "",
-          state: "",
-          district: dStr,
-          unit: ""
-        });
-
-        Logger.log(`District ${dStr} fetch for ${yr}: ${url}`);
-
-        json = fetchJsonViaProxy(url);
-        rows = (json && Array.isArray(json.aaData)) ? json.aaData : [];
-        Logger.log(`  District ${dStr} rows (${yr}): ${rows.length}`);
-
-        rows.forEach(cols => {
-          all.push(normalizeRow_(cols, dStr));  // force district = d
-        });
-
-        Utilities.sleep(150);
-      }
-    });
-
-    Logger.log(`Total raw rows collected: ${all.length}`);
-
-    // --- De-duplicate: one row per (sanction, start-date, district) ---
-
-    const seen = new Set();
-    const deduped = [];
-
-    all.forEach(e => {
-      const startKey = e.start
-        ? Utilities.formatDate(e.start, tz, "yyyy-MM-dd")
-        : "";
-      const key = [
-        e.sanction || "",
-        startKey,
-        e.district || ""
-      ].join("|");
-
-      if (seen.has(key)) return;
-      seen.add(key);
-      deduped.push(e);
-    });
-
-    Logger.log(`after dedup: ${deduped.length} rows`);
-
-    // --- Future filter ---
-    const todayStr = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd");
-    const today = new Date(todayStr + "T00:00:00");
-
-    const future = deduped.filter(r => r.end && r.end >= today);
-    Logger.log(`after future-filter: ${future.length} rows (today=${todayStr})`);
-
-    // --- Sort by start date ---
-    future.sort((a, b) => {
-      const as = a.start ? a.start.getTime() : 9e15;
-      const bs = b.start ? b.start.getTime() : 9e15;
-      return as - bs;
-    });
-
-    Logger.log(`writing ${future.length} rows to Upcoming`);
-    writeSheet(future);
-
-    if (future.length < 100) {
-      const msg = `Warning: refreshCalendar wrote only ${future.length} rows. Check ACBL or proxy.`;
-      Logger.log(msg);
-      try {
-        MailApp.sendEmail({
-          to: "bridge.craftwork@gmail.com",
-          subject: "[ACBL Calendar] Low row count warning",
-          body: msg
-        });
-      } catch (e) {
-        Logger.log("MailApp failed: " + e);
-      }
-    }    
-
-    if (typeof updateDistrictSheetsMeta === "function") {
-      updateDistrictSheetsMeta(future);
+    raw = fetchAllRawViaProxy_(years);
+  } catch (err) {
+    const msg = (err && err.stack) ? err.stack : String(err);
+    const lastIngest = Number(PropertiesService.getScriptProperties().getProperty("LAST_INGEST_AT") || 0);
+    const ageHrs = (Date.now() - lastIngest) / 36e5;
+    if (lastIngest && ageHrs < INGEST_FRESH_HOURS) {
+      Logger.log(`Proxy failed, but local ingest ran ${ageHrs.toFixed(1)}h ago; skipping. ${msg}`);
+      logRun_("SKIPPED", `Proxy blocked; using local ingest from ${ageHrs.toFixed(1)}h ago. ${String(err)}`, "", years);
+      return;
     }
+    Logger.log("ERROR in refreshCalendar: " + msg);
+    logRun_("ERROR", msg, "", years);
+    throw err;
+  }
 
-    if (typeof logRun_ === "function") {
-      logRun_("OK", `Fetched and wrote ${future.length} rows`, future.length, years);
-    }
-
+  try {
+    processRaw_(raw, years, "proxy");
   } catch (err) {
     const msg = (err && err.stack) ? err.stack : String(err);
     Logger.log("ERROR in refreshCalendar: " + msg);
-    if (typeof logRun_ === "function") {
-      logRun_("ERROR", msg, all.length, years);
-    }
+    logRun_("ERROR", msg, raw.length, years);
     throw err;
   }
+}
+
+/***** INGEST FROM LOCAL SCRAPER *****/
+// POST body: { secret, years: [2026, 2027], raw: [{ district: "" | "1".."25", cols: [...] }] }
+function doPost(e) {
+  const out = (obj) => ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return out({ ok: false, error: "Bad JSON" });
+  }
+
+  const secret = PropertiesService.getScriptProperties().getProperty("INGEST_SECRET");
+  if (!secret || body.secret !== secret) return out({ ok: false, error: "Unauthorized" });
+  if (!Array.isArray(body.raw) || !Array.isArray(body.years)) {
+    return out({ ok: false, error: "Missing raw or years" });
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return out({ ok: false, error: "Busy" });
+  try {
+    const written = processRaw_(body.raw, body.years, "local");
+    PropertiesService.getScriptProperties().setProperty("LAST_INGEST_AT", String(Date.now()));
+    return out({ ok: true, rows: written });
+  } catch (err) {
+    const msg = (err && err.stack) ? err.stack : String(err);
+    logRun_("ERROR", "[local] " + msg, body.raw.length, body.years);
+    return out({ ok: false, error: String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/***** FETCH: NABC once per year + every district *****/
+function fetchAllRawViaProxy_(years) {
+  const raw = [];
+
+  years.forEach(yr => {
+    // 1) NABC events once per year
+    const nabcUrl = makeUrl_(CFG.apiBase, {
+      month: "",
+      year: yr,
+      category: "N",   // NABC
+      type: "",
+      city: "",
+      state: "",
+      district: "",
+      unit: ""
+    });
+    Logger.log(`NABC fetch for ${yr}: ${nabcUrl}`);
+
+    let json = fetchJsonViaProxy(nabcUrl);
+    let rows = (json && Array.isArray(json.aaData)) ? json.aaData : [];
+    Logger.log(`  NABC rows (${yr}): ${rows.length}`);
+    rows.forEach(cols => raw.push({ district: "", cols }));  // no district; global
+
+    Utilities.sleep(200);
+
+    // 2) Per-district all events (catches STaC & any cross-district definitions)
+    for (let d = 1; d <= 25; d++) {
+      const dStr = String(d);
+      const url = makeUrl_(CFG.apiBase, {
+        month: "",
+        year: yr,
+        category: "",  // all categories
+        type: "",      // all types
+        city: "",
+        state: "",
+        district: dStr,
+        unit: ""
+      });
+
+      Logger.log(`District ${dStr} fetch for ${yr}: ${url}`);
+
+      json = fetchJsonViaProxy(url);
+      rows = (json && Array.isArray(json.aaData)) ? json.aaData : [];
+      Logger.log(`  District ${dStr} rows (${yr}): ${rows.length}`);
+      rows.forEach(cols => raw.push({ district: dStr, cols }));  // force district = d
+
+      Utilities.sleep(150);
+    }
+  });
+
+  return raw;
+}
+
+/***** PROCESS: normalize, dedupe, filter, write *****/
+function processRaw_(raw, years, source) {
+  const tz = CFG.timezone || "America/Los_Angeles";
+  const all = raw.map(r => normalizeRow_(r.cols, r.district));
+
+  Logger.log(`[${source}] Total raw rows collected: ${all.length}`);
+
+  // --- De-duplicate: one row per (sanction, start-date, district) ---
+
+  const seen = new Set();
+  const deduped = [];
+
+  all.forEach(e => {
+    const startKey = e.start
+      ? Utilities.formatDate(e.start, tz, "yyyy-MM-dd")
+      : "";
+    const key = [
+      e.sanction || "",
+      startKey,
+      e.district || ""
+    ].join("|");
+
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push(e);
+  });
+
+  Logger.log(`after dedup: ${deduped.length} rows`);
+
+  // --- Future filter ---
+  const todayStr = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd");
+  const today = new Date(todayStr + "T00:00:00");
+
+  const future = deduped.filter(r => r.end && r.end >= today);
+  Logger.log(`after future-filter: ${future.length} rows (today=${todayStr})`);
+
+  // --- Sort by start date ---
+  future.sort((a, b) => {
+    const as = a.start ? a.start.getTime() : 9e15;
+    const bs = b.start ? b.start.getTime() : 9e15;
+    return as - bs;
+  });
+
+  Logger.log(`writing ${future.length} rows to Upcoming`);
+  writeSheet(future);
+
+  if (future.length < 100) {
+    const msg = `Warning: refreshCalendar (${source}) wrote only ${future.length} rows. Check ACBL or proxy.`;
+    Logger.log(msg);
+    try {
+      MailApp.sendEmail({
+        to: "bridge.craftwork@gmail.com",
+        subject: "[ACBL Calendar] Low row count warning",
+        body: msg
+      });
+    } catch (e) {
+      Logger.log("MailApp failed: " + e);
+    }
+  }
+
+  if (typeof updateDistrictSheetsMeta === "function") {
+    updateDistrictSheetsMeta(future);
+  }
+
+  logRun_("OK", `[${source}] Fetched and wrote ${future.length} rows`, future.length, years);
+  return future.length;
 }
 
 /***** FETCH VIA PROXY *****/
@@ -161,8 +218,12 @@ function fetchJsonViaProxy(targetUrl) {
     headers: { "x-proxy-secret": CFG.proxySecret, "Accept": "application/json" }
   });
   const code = res.getResponseCode();
-  if (code >= 400) throw new Error("Proxy fetch failed " + code + " for " + targetUrl);
   const txt = res.getContentText();
+  if (code >= 400) {
+    // Surface the page title so the Log shows e.g. a Cloudflare block vs. a real 404
+    const title = (txt.match(/<title>([^<]*)<\/title>/i) || [])[1] || txt.slice(0, 120);
+    throw new Error("Proxy fetch failed " + code + " (" + title.trim() + ") for " + targetUrl);
+  }
 
   // Try JSON; if not JSON, log first 2KB for debugging
   try {
