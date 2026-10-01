@@ -38,7 +38,8 @@ Clasp is authenticated as `bridge-craftwork@gmail.com`. Do not run `clasp login`
 - In Apps Script: set as a Script Property (Project Settings → Script Properties)
 - The value is stored in 1Password
 - `INGEST_SECRET` guards the `doPost` web app. It's stored in Script Properties and in the macOS Keychain (service `acbl-ingest`). The web app URL is in `local-scraper/config.json` (gitignored)
-- After changing `appsscript.json`, use `clasp push -f` (plain push silently skips manifest changes), then `clasp deploy -i <deploymentId>` to update the web app
+- After changing `appsscript.json`, use `clasp push -f` (plain push silently skips manifest changes)
+- The web app serves the last **deployed** version, not the pushed head. After any `Code.js` change that affects `doPost`/`processRaw_`, run `clasp deploy -i AKfycbyl_XTYGEvLsTPwxLWFKLxeF-TNjWcNNLxS_FK6rlmNdN87KCgI2QI50Tki7XBpYbq17w` or the local scraper keeps using the old code
 
 ## Key Config (appsscript/Code.js)
 

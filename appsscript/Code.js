@@ -394,8 +394,19 @@ function parseAcblDateRange(s) {
   const day = "(\\d{1,2})";
   const year = "(\\d{4})";
 
-  // Cross-month: "Apr 30-May 3, 2025"
-  let m = txt.match(new RegExp(`^${mon}\\s+${day}-${mon}\\s+${day},\\s*${year}$`, "i"));
+  const sep = "\\s*-\\s*";  // ACBL spaces the dash in some ranges: "Nov 26 - Dec 6, 2026"
+
+  // Cross-year: "Dec 28, 2026 - Jan 3, 2027"
+  let m = txt.match(new RegExp(`^${mon}\\s+${day},\\s*${year}${sep}${mon}\\s+${day},\\s*${year}$`, "i"));
+  if (m) {
+    return {
+      start: new Date(+m[3], monthIdx(m[1]), +m[2]),
+      end:   new Date(+m[6], monthIdx(m[4]), +m[5])
+    };
+  }
+
+  // Cross-month: "Apr 30-May 3, 2025", "Nov 26 - Dec 6, 2026"
+  m = txt.match(new RegExp(`^${mon}\\s+${day}${sep}${mon}\\s+${day},\\s*${year}$`, "i"));
   if (m) {
     const y = +m[5];
     return {
@@ -405,7 +416,7 @@ function parseAcblDateRange(s) {
   }
 
   // Same-month: "Jan 6-12, 2025"
-  m = txt.match(new RegExp(`^${mon}\\s+${day}-${day},\\s*${year}$`, "i"));
+  m = txt.match(new RegExp(`^${mon}\\s+${day}${sep}${day},\\s*${year}$`, "i"));
   if (m) {
     const y = +m[4], mo = monthIdx(m[1]);
     return { start: new Date(y, mo, +m[2]), end: new Date(y, mo, +m[3]) };
