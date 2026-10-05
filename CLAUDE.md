@@ -10,7 +10,7 @@ This repo contains two components that work together:
 ## Cloudflare (since Aug 2026)
 
 tournaments.acbl.org is behind a Cloudflare bot check. The Cloud Run proxy gets `403 (Just a moment...)`, and headless Chrome is blocked outright, so the working path is `local-scraper/scrape.mjs` in **headed** Chrome.
-- Schedule: LaunchAgent `com.bridgecraftwork.acbl-scraper` at 1:30 AM, logging to `~/Library/Logs/acbl-scraper.log`
+- Schedule: LaunchAgent `com.bridgecraftwork.acbl-scraper` at 1:30 AM, logging to `~/Library/Logs/acbl-scraper.log`. It runs a copy of `local-scraper/`; see "launchd job" below
 - `refreshCalendar()` (1:55 AM trigger) logs `SKIPPED` instead of failing if a local ingest landed within 20h
 - Endpoint: `https://tournaments.acbl.org/ajax/tournamentslist` (moved from `/includes/ajax/tournamentslist.php`)
 - If Cloudflare blocks the scraper, delete `~/Library/Application Support/acbl-scraper/profile`
@@ -56,3 +56,16 @@ Clasp is authenticated as `bridge-craftwork@gmail.com`. Do not run `clasp login`
 - **CalendarEvents** — index of synced calendar event IDs (used for upsert/delete logic)
 - **Log** — run history for `refreshCalendar()`
 - **Calendar Log** — run history for calendar sync
+
+## launchd job (`jobs/`) — run `jobs/deploy.sh` after changing them
+
+This repo lives on the Express (`/Volumes/Express2T`), and macOS won't let a
+launchd job read an external volume without Full Disk Access. So the job runs
+from a **copy** on the internal SSD, at
+`~/Library/Application Support/launchd-jobs/acbl-proxy/`, which
+[`jobs/deploy.sh`](jobs/deploy.sh) refreshes before (re)loading the job.
+Plists are templates in [`jobs/launchd/`](jobs/launchd/), never edited in
+`~/Library/LaunchAgents` directly.
+
+**After changing anything in `local-scraper/` (including `npm install` or `config.json`) or `jobs/launchd/`, run `jobs/deploy.sh`.** Until you do, launchd keeps
+running the old copy, and nothing tells you so.

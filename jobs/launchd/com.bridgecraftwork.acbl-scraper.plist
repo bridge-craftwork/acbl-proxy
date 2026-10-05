@@ -7,10 +7,10 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/node</string>
-    <string>/Users/rick/Development/GitHub/acbl-proxy/local-scraper/scrape.mjs</string>
+    <string>@JOB_DIR@/scrape.mjs</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/rick/Development/GitHub/acbl-proxy/local-scraper</string>
+  <string>@JOB_DIR@</string>
   <!-- Before the 1:55 AM refreshCalendar trigger, which then sees a fresh ingest and skips.
        If the Mac is asleep at 1:30, launchd runs this on wake. -->
   <key>StartCalendarInterval</key>
@@ -21,8 +21,8 @@
     <integer>30</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/rick/Library/Logs/acbl-scraper.log</string>
+  <string>@HOME@/Library/Logs/acbl-scraper.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/rick/Library/Logs/acbl-scraper.log</string>
+  <string>@HOME@/Library/Logs/acbl-scraper.log</string>
 </dict>
 </plist>
